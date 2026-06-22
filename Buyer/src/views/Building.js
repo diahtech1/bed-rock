@@ -1,4 +1,4 @@
-import { databases, account, DB_ID, COL_BUILDING, COL_ROOM, COL_BOOKING, COL_REVIEW, syncSavedItem } from '../appwrite.js';
+import { databases, account, DB_ID, COL_BUILDING, COL_ROOM, COL_BOOKING, COL_REVIEW, COL_BUYER, syncSavedItem } from '../appwrite.js';
 
 export default class Building {
     constructor(params) {
@@ -60,18 +60,28 @@ export default class Building {
                 ]);
                 const allBookings = bookingsResponse.documents;
                 
-                // Hydrate Reviews and Buyers
-                for (let b of allBookings) {
+                // Keep only relevant bookings for this building's rooms OR this building itself
+                const roomIds = this.rooms.map(r => r.$id);
+                const relevantBookings = allBookings.filter(b => {
+                    const bRoomId = typeof b.Room === 'object' && b.Room !== null ? b.Room.$id : b.Room;
+                    const bBldgId = typeof b.Building === 'object' && b.Building !== null ? b.Building.$id : b.Building;
+                    return roomIds.includes(bRoomId) || bBldgId === this.buildingId;
+                });
+                
+                // Hydrate Reviews and Buyers concurrently for relevant bookings only
+                await Promise.all(relevantBookings.map(async b => {
+                    const promises = [];
                     if (typeof b.Review === 'string') {
-                        try { b.Review = await databases.getDocument(DB_ID, COL_REVIEW, b.Review); } catch(e) {}
+                        promises.push(databases.getDocument(DB_ID, COL_REVIEW, b.Review).then(rev => b.Review = rev).catch(e => {}));
                     }
                     if (typeof b.Buyer === 'string') {
-                        try { b.Buyer = await databases.getDocument(DB_ID, COL_BUYER, b.Buyer); } catch(e) {}
+                        promises.push(databases.getDocument(DB_ID, COL_BUYER, b.Buyer).then(buy => b.Buyer = buy).catch(e => {}));
                     }
-                }
+                    await Promise.all(promises);
+                }));
                 
                 this.rooms.forEach(r => {
-                    r.Bookings = allBookings.filter(b => {
+                    r.Bookings = relevantBookings.filter(b => {
                         const bRoomId = typeof b.Room === 'object' && b.Room !== null ? b.Room.$id : b.Room;
                         return bRoomId === r.$id;
                     });

@@ -14,6 +14,7 @@ export const COL_ROOM = 'room';
 export const COL_BOOKING = 'booking';
 export const COL_REVIEW = 'review';
 export { ID };
+export { Query }
 
 export const syncSavedItem = (type, itemId, action) => {
     if (action === 'add') {

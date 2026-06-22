@@ -8,23 +8,30 @@ export class LoginView {
 
     async render() {
         return `
-            <div style="max-width: 400px; margin: 2rem auto;" class="card">
-                <h2 style="margin-bottom: 1.5rem; text-align: center; color: var(--accent);">Login</h2>
-                <div id="login-error" class="error-msg"></div>
+            <div style="max-width: 400px; margin: 4rem auto; padding: 2.5rem; background: var(--bg-secondary); border: 1px solid var(--glass-border); border-radius: 1.5rem; box-shadow: 0 20px 40px var(--shadow-color); backdrop-filter: blur(10px);">
+                <div style="text-align: center; margin-bottom: 2rem;">
+                    <h2 style="font-size: 2rem; font-weight: 800; color: var(--text-primary); letter-spacing: -0.5px;">Welcome Back</h2>
+                    <p style="color: var(--text-secondary); margin-top: 0.5rem;">Sign in to your Bedrock account</p>
+                </div>
+                <div id="login-error" class="error-msg" style="text-align: center; margin-bottom: 1rem;"></div>
                 <form id="login-form">
-                    <label>Email</label>
-                    <input type="email" id="email" required />
-                    
-                    <label>Password</label>
-                    <div style="position: relative;">
-                        <input type="password" id="password" required minlength="8" />
-                        <button type="button" id="toggle-password" style="position: absolute; right: 10px; top: 12px; background: transparent; border: none; cursor: pointer; color: var(--text-secondary); font-size: 0.8rem; font-weight: 600;">SHOW</button>
+                    <div style="margin-bottom: 1.25rem;">
+                        <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">Email</label>
+                        <input type="email" id="email" placeholder="Your email address" required style="width: 100%; padding: 0.75rem 1rem; border: 1px solid var(--glass-border); border-radius: 0.5rem; background: var(--bg-color); color: var(--text-primary); outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--glass-border)'" />
                     </div>
                     
-                    <button type="submit" class="btn" style="width: 100%; margin-top: 1rem;">Login</button>
+                    <div style="margin-bottom: 1.5rem;">
+                        <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">Password</label>
+                        <div style="position: relative; display: block;">
+                            <input type="password" id="password" required minlength="8" style="width: 100%; padding: 0.75rem 1rem; padding-right: 4rem; margin-bottom: 0 !important; border: 1px solid var(--glass-border); border-radius: 0.5rem; background: var(--bg-color); color: var(--text-primary); outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--glass-border)'" />
+                            <button type="button" id="toggle-password" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; color: var(--text-secondary); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.5px;">SHOW</button>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" id="btn-login-submit" class="btn" style="width: 100%; padding: 0.8rem; font-size: 1rem; font-weight: 600; border-radius: 0.5rem; box-shadow: 0 4px 6px rgba(37,99,235,0.2); transition: all 0.2s;">Sign In</button>
                 </form>
-                <p style="text-align: center; margin-top: 1.5rem; font-size: 0.9rem;">
-                    Don't have an account? <a href="/signup" data-link style="color: var(--accent);">Sign up</a>
+                <p style="text-align: center; margin-top: 2rem; font-size: 0.95rem; color: var(--text-secondary);">
+                    Don't have an account? <a href="/signup" data-link style="color: var(--accent); font-weight: 600; text-decoration: none;">Sign up</a>
                 </p>
             </div>
         `;
@@ -61,6 +68,14 @@ export class LoginView {
             errorDiv.textContent = '';
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
+            const submitBtn = document.getElementById('btn-login-submit');
+            
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Signing you in...';
+                submitBtn.style.opacity = '0.7';
+                submitBtn.style.pointerEvents = 'none';
+            }
             
             try {
                 await account.createEmailPasswordSession(email, password);
@@ -80,6 +95,12 @@ export class LoginView {
             } catch (err) {
                 console.error(err);
                 errorDiv.textContent = "Incorrect email or password.";
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Sign In';
+                    submitBtn.style.opacity = '1';
+                    submitBtn.style.pointerEvents = 'auto';
+                }
             }
         });
     }
