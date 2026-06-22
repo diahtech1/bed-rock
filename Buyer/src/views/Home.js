@@ -1,4 +1,4 @@
-import { databases, DB_ID, COL_BUILDING, Query, syncSavedItem } from '../appwrite.js';
+import { databases, DB_ID, COL_BUILDING, COL_ROOM, COL_BOOKING, COL_REVIEW, Query, syncSavedItem } from '../appwrite.js';
 
 export default class Home {
     constructor() {
@@ -33,8 +33,66 @@ export default class Home {
 
     async mounted() {
         try {
-            const response = await databases.listDocuments(DB_ID, COL_BUILDING, [Query.limit(100)]);
-            let allBuildings = response.documents;
+            const [bRes, rRes, bkRes, revRes] = await Promise.all([
+                databases.listDocuments(DB_ID, COL_BUILDING, [Query.limit(100)]),
+                databases.listDocuments(DB_ID, COL_ROOM, [Query.limit(1000)]),
+                databases.listDocuments(DB_ID, COL_BOOKING, [Query.limit(1000)]),
+                databases.listDocuments(DB_ID, COL_REVIEW, [Query.limit(1000)])
+            ]);
+            let allBuildings = bRes.documents;
+            let rooms = rRes.documents;
+            let allBookings = bkRes.documents;
+            let allReviews = revRes.documents;
+
+            allBuildings.forEach(building => {
+                building.cachedRooms = rooms.filter(r => {
+                    const bId = (typeof r.Building === 'object' && r.Building !== null) ? r.Building.$id : r.Building;
+                    return bId === building.$id && r.Status !== 'Closed';
+                });
+                let availableCount = 0;
+                let totalPrice = 0;
+                const now = new Date();
+                building.cachedRooms.forEach(room => {
+                    let isBooked = false;
+                    const roomBookings = allBookings.filter(b => {
+                        const bRoomId = typeof b.Room === 'object' && b.Room !== null ? b.Room.$id : b.Room;
+                        return bRoomId === room.$id;
+                    });
+                    if (roomBookings.length > 0) {
+                        isBooked = roomBookings.some(booking => {
+                            const start = new Date(booking.StartDate);
+                            const end = new Date(booking.EndDate);
+                            return now >= start && now <= end;
+                        });
+                    }
+                    if (!isBooked) {
+                        availableCount++;
+                        totalPrice += room.RoomPrice || 0;
+                    }
+                });
+                building.availableRoomsCount = availableCount;
+                building.averageAvailablePrice = availableCount > 0 ? (totalPrice / availableCount) : 0;
+
+                // Calculate Reviews
+                const roomIds = building.cachedRooms.map(r => r.$id);
+                const bBookings = allBookings.filter(b => {
+                    const rId = (typeof b.Room === 'object' && b.Room !== null) ? b.Room.$id : b.Room;
+                    return roomIds.includes(rId);
+                });
+                const bookingIds = bBookings.map(b => b.$id);
+                const bReviews = allReviews.filter(r => {
+                    const bkId = (typeof r.Booking === 'object' && r.Booking !== null) ? r.Booking.$id : r.Booking;
+                    return bookingIds.includes(bkId);
+                });
+                
+                building.reviewCount = bReviews.length;
+                if (bReviews.length > 0) {
+                    const sum = bReviews.reduce((acc, r) => acc + (r.Rating || 0), 0);
+                    building.averageRating = sum / bReviews.length;
+                } else {
+                    building.averageRating = null;
+                }
+            });
             
             // Randomly select up to 6 buildings
             const shuffled = allBuildings.sort(() => 0.5 - Math.random());
@@ -85,13 +143,26 @@ export default class Home {
                         </div>
                     </div>
                     <div style="padding: 1.5rem; flex: 1; display: flex; flex-direction: column;">
-                        <h3 style="color: var(--text-primary); margin-bottom: 0.5rem; font-size: 1.3rem; font-weight: 700;">${building.Name || 'Unnamed Building'}</h3>
-                        <p style="font-size: 0.95rem; color: var(--text-secondary); flex: 1; display: flex; align-items: flex-start; gap: 0.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <h3 style="color: var(--text-primary); margin-bottom: 0.2rem; font-size: 1.3rem; font-weight: 800;">${building.Name || 'Unnamed Building'}</h3>
+                            <div style="display: flex; align-items: center; gap: 0.25rem; background: var(--bg-color); padding: 0.2rem 0.6rem; border-radius: 1rem; border: 1px solid var(--glass-border);">
+                                <svg fill="currentColor" viewBox="0 0 24 24" width="14" height="14" style="color: #fbbf24;"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"></path></svg>
+                                <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">${building.averageRating ? building.averageRating.toFixed(1) : 'New'}</span>
+                            </div>
+                        </div>
+                        <p style="font-size: 0.95rem; color: var(--text-secondary); margin-bottom: 1rem; display: flex; align-items: flex-start; gap: 0.5rem;">
                             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16" style="margin-top: 2px; flex-shrink: 0;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                             <span>${building.Address || 'No Address Provided'}</span>
                         </p>
-                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--glass-border); display: flex; justify-content: space-between; align-items: center;">
-                            <span style="color: var(--accent); font-weight: 600; font-size: 0.9rem;">View Details &rarr;</span>
+                        <div style="margin-top: auto; border-top: 1px solid var(--glass-border); padding-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; margin-bottom: 0.2rem;">Available</div>
+                                <div style="font-size: 1.1rem; font-weight: 800; color: ${building.availableRoomsCount > 0 ? 'var(--success)' : (building.roomCount > 0 ? 'var(--success)' : 'var(--danger)')};">${building.availableRoomsCount !== undefined ? building.availableRoomsCount : (building.roomCount || 0)} Rooms</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; margin-bottom: 0.2rem;">${building.LeasingPeriod ? building.LeasingPeriod.charAt(0).toUpperCase() + building.LeasingPeriod.slice(1) + ' Price' : 'Price'}</div>
+                                <div style="font-size: 1.1rem; font-weight: 800; color: var(--accent);">${building.averageAvailablePrice ? `₦${Math.round(building.averageAvailablePrice).toLocaleString()}` : (building.Price ? `₦${Math.round(building.Price).toLocaleString()}` : 'View Details')}</div>
+                            </div>
                         </div>
                     </div>
                 </div>

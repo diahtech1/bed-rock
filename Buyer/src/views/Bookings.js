@@ -1,4 +1,4 @@
-import { account, databases, DB_ID, COL_BOOKING, COL_BUILDING, COL_BUYER, COL_ROOM } from '../appwrite.js';
+import { account, databases, DB_ID, COL_BOOKING, COL_BUILDING, COL_BUYER, COL_ROOM, COL_REVIEW } from '../appwrite.js';
 import { navigateTo } from '../main.js';
 
 export default class Bookings {
@@ -64,7 +64,6 @@ export default class Bookings {
             ]);
             this.bookings = bookingsRes.documents;
             
-            // Hydrate nested relationships manually in case Appwrite returns just IDs
             for (let b of this.bookings) {
                 if (typeof b.Room === 'string') {
                     try {
@@ -88,16 +87,66 @@ export default class Bookings {
             this.renderBookings();
 
             // Load 5 random buildings
-            const buildingsRes = await databases.listDocuments(DB_ID, COL_BUILDING);
+            const [buildingsRes, roomsRes, allBookingsRes, reviewsRes] = await Promise.all([
+                databases.listDocuments(DB_ID, COL_BUILDING),
+                databases.listDocuments(DB_ID, COL_ROOM, [Query.limit(1000)]),
+                databases.listDocuments(DB_ID, COL_BOOKING, [Query.limit(1000)]),
+                databases.listDocuments(DB_ID, COL_REVIEW, [Query.limit(1000)])
+            ]);
             const allBuildings = buildingsRes.documents;
-            
-            // Load all rooms to accurately count them per building
-            const roomsRes = await databases.listDocuments(DB_ID, COL_ROOM);
             const allRooms = roomsRes.documents;
+            const allBookings = allBookingsRes.documents;
+            const allReviews = reviewsRes.documents;
 
             const shuffled = allBuildings.sort(() => 0.5 - Math.random());
             this.featuredBuildings = shuffled.slice(0, 5).map(b => {
-                b.roomCount = allRooms.filter(r => r.Building && (r.Building.$id === b.$id || r.Building === b.$id)).length;
+                const bRooms = allRooms.filter(r => r.Building && (r.Building.$id === b.$id || r.Building === b.$id));
+                b.roomCount = bRooms.length;
+                
+                let availableCount = 0;
+                let totalPrice = 0;
+                const now = new Date();
+                bRooms.forEach(room => {
+                    let isBooked = false;
+                    const roomBookings = allBookings.filter(bk => {
+                        const rId = typeof bk.Room === 'object' && bk.Room !== null ? bk.Room.$id : bk.Room;
+                        return rId === room.$id;
+                    });
+                    if (roomBookings.length > 0) {
+                        isBooked = roomBookings.some(booking => {
+                            const start = new Date(booking.StartDate);
+                            const end = new Date(booking.EndDate);
+                            return now >= start && now <= end;
+                        });
+                    }
+                    if (!isBooked) {
+                        availableCount++;
+                        totalPrice += room.RoomPrice || 0;
+                    }
+                });
+                b.availableRoomsCount = availableCount;
+                b.averageAvailablePrice = availableCount > 0 ? (totalPrice / availableCount) : 0;
+
+                // Calculate Reviews
+                const roomIds = bRooms.map(r => r.$id);
+                const bBookingsForReviews = allBookings.filter(bk => {
+                    const rId = (typeof bk.Room === 'object' && bk.Room !== null) ? bk.Room.$id : bk.Room;
+                    return roomIds.includes(rId);
+                });
+                const bookingIds = bBookingsForReviews.map(bk => bk.$id);
+                const bReviews = allReviews.filter(r => {
+                    const bkId = (typeof r.Booking === 'object' && r.Booking !== null) ? r.Booking.$id : r.Booking;
+                    return bookingIds.includes(bkId);
+                });
+                
+                b.reviewCount = bReviews.length;
+                if (bReviews.length > 0) {
+                    const sum = bReviews.reduce((acc, r) => acc + (r.Rating || 0), 0);
+                    b.averageRating = sum / bReviews.length;
+                } else {
+                    b.averageRating = null;
+                }
+                
                 return b;
             });
 
@@ -126,69 +175,66 @@ export default class Bookings {
             const roomName = b.Room ? b.Room.RoomName : 'Unknown Room';
             const buildingName = (b.Room && b.Room.Building) ? b.Room.Building.Name : 'Unknown Building';
             const buildingId = (b.Room && b.Room.Building) ? b.Room.Building.$id : null;
-            const start = new Date(b.StartDate).toLocaleDateString();
-            const end = new Date(b.EndDate).toLocaleDateString();
             
-            const bLink = buildingId ? `<a href="/building/${buildingId}" data-link style="color: var(--text-primary); font-weight: 700; text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-primary)'">${buildingName}</a>` : buildingName;
-            const rLink = (buildingId && b.Room) ? `<a href="/building/${buildingId}#room-${b.Room.$id}" data-link style="color: var(--text-secondary); text-decoration: none; font-weight: 500; transition: color 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-secondary)'">${roomName}</a>` : roomName;
-            
+            // Format dates nicely, e.g. "Oct 12 - Oct 15, 2026"
             const startObj = new Date(b.StartDate);
             const endObj = new Date(b.EndDate);
+            const startStr = startObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            const endStr = endObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+            const dateRange = `${startStr} - ${endStr}`;
+            
+            const bLink = buildingId ? `<a href="/building/${buildingId}" data-link style="color: var(--text-primary); font-weight: 700; text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-primary)'">${buildingName}</a>` : buildingName;
+            
             const now = new Date();
             
             let statusBadge = '';
             let isPast = false;
             if (now < startObj) {
-                const diffTime = Math.abs(startObj - now);
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                statusBadge = `<span style="font-size:0.75rem; background:rgba(37,99,235,0.1); color:var(--accent); padding:0.3rem 0.6rem; border-radius:1rem; font-weight:700; text-transform: uppercase; letter-spacing: 0.5px;">Upcoming (in ${diffDays} day${diffDays!==1?'s':''})</span>`;
+                statusBadge = `<span style="font-size:0.75rem; background:rgba(37,99,235,0.1); color:var(--accent); padding:0.3rem 0.8rem; border-radius:2rem; font-weight:700; text-transform: uppercase; letter-spacing: 0.5px;">Upcoming</span>`;
             } else if (now >= startObj && now <= endObj) {
-                const diffTime = Math.abs(endObj - now);
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                statusBadge = `<span style="font-size:0.75rem; background:rgba(22,163,74,0.1); color:var(--success); padding:0.3rem 0.6rem; border-radius:1rem; font-weight:700; text-transform: uppercase; letter-spacing: 0.5px;">Active (${diffDays} day${diffDays!==1?'s':''} left)</span>`;
+                statusBadge = `<span style="font-size:0.75rem; background:rgba(22,163,74,0.1); color:var(--success); padding:0.3rem 0.8rem; border-radius:2rem; font-weight:700; text-transform: uppercase; letter-spacing: 0.5px;">Active</span>`;
             } else {
                 isPast = true;
-                statusBadge = `<span style="font-size:0.75rem; background:var(--bg-color); border:1px solid var(--glass-border); color:var(--text-secondary); padding:0.3rem 0.6rem; border-radius:1rem; font-weight:700; text-transform: uppercase; letter-spacing: 0.5px;">Completed</span>`;
+                statusBadge = `<span style="font-size:0.75rem; background:var(--bg-color); border:1px solid var(--glass-border); color:var(--text-secondary); padding:0.3rem 0.8rem; border-radius:2rem; font-weight:700; text-transform: uppercase; letter-spacing: 0.5px;">Completed</span>`;
             }
             
             const hasReviewed = !!b.Review;
-            const canReviewDate = startObj;
-            const canReview = now >= canReviewDate;
+            const canReview = now >= startObj;
             
             let actionHtml = '';
             if (hasReviewed) {
-                actionHtml = `<button class="btn btn-sm" style="background:transparent; border: 1px solid var(--success); color:var(--success); padding: 0.5rem 1rem; border-radius: 0.5rem; opacity: 0.8; cursor: not-allowed; font-weight: 600;" disabled>Reviewed</button>`;
-            } else if (!canReview) {
-                actionHtml = `<button class="btn btn-sm" title="Review available on ${canReviewDate.toLocaleDateString()}" style="background:var(--bg-color); border: 1px solid var(--glass-border); color:var(--text-secondary); padding: 0.5rem 1rem; border-radius: 0.5rem; opacity: 0.7; cursor: not-allowed; font-weight: 600;" disabled>Review Later</button>`;
-            } else {
-                actionHtml = `<button class="btn btn-sm btn-review" data-id="${b.$id}" style="background:var(--accent); color:white; padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 600; box-shadow: 0 4px 6px rgba(37,99,235,0.2); transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 12px rgba(37,99,235,0.3)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(37,99,235,0.2)';">Leave Review</button>`;
+                actionHtml = `<span style="color:var(--success); font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 0.25rem;"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Reviewed</span>`;
+            } else if (canReview) {
+                actionHtml = `<button class="btn btn-sm btn-review" data-id="${b.$id}" style="background:var(--accent); color:white; padding: 0.5rem 1.5rem; border-radius: 0.5rem; font-weight: 600; transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-2px)';" onmouseout="this.style.transform='translateY(0)';">Leave Review</button>`;
             }
+            // If cannot review yet, show nothing to keep it clean.
             
             return `
-                <div style="background: var(--bg-secondary); border: 1px solid var(--glass-border); border-radius: 1rem; padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; box-shadow: 0 4px 6px var(--shadow-color); transition: transform 0.2s, box-shadow 0.2s; ${isPast ? 'opacity: 0.85;' : ''}" onmouseover="this.style.transform='translateY(-3px)'; this.style.boxShadow='0 12px 24px var(--shadow-color)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px var(--shadow-color)';">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
+                <div style="background: var(--bg-secondary); border: 1px solid var(--glass-border); border-radius: 1.2rem; padding: 2rem; display: flex; flex-direction: column; gap: 1.5rem; box-shadow: 0 4px 6px var(--shadow-color); transition: transform 0.2s, box-shadow 0.2s; ${isPast ? 'opacity: 0.75;' : ''}" onmouseover="this.style.transform='translateY(-3px)'; this.style.boxShadow='0 12px 24px var(--shadow-color)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px var(--shadow-color)';">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
                         <div>
-                            <div style="margin-bottom: 0.5rem;">${statusBadge}</div>
-                            <h4 style="font-size: 1.25rem; margin-bottom: 0.25rem; font-weight: 800;">${bLink}</h4>
-                            <div style="font-size: 1rem; color: var(--text-secondary); display: flex; align-items: center; gap: 0.5rem;">
-                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
-                                ${rLink}
+                            <div style="margin-bottom: 0.8rem;">${statusBadge}</div>
+                            <h4 style="font-size: 1.4rem; margin-bottom: 0.2rem; font-weight: 800;">${bLink}</h4>
+                            <div style="font-size: 1rem; color: var(--text-secondary); font-weight: 500;">
+                                ${roomName}
                             </div>
                         </div>
-                        <div style="text-align: right; background: var(--bg-color); padding: 0.75rem 1rem; border-radius: 0.75rem; border: 1px solid var(--glass-border);">
-                            <div style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; margin-bottom: 0.25rem;">Stay Dates</div>
-                            <div style="font-weight: 700; color: var(--text-primary); font-size: 0.95rem;">${start} &rarr; ${end}</div>
-                        </div>
                     </div>
-                    <div style="border-top: 1px solid var(--glass-border); padding-top: 1rem; display: flex; justify-content: flex-end;">
-                        ${actionHtml}
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid var(--glass-border); padding-top: 1.5rem;">
+                        <div style="font-weight: 600; color: var(--text-secondary); font-size: 0.95rem;">
+                            ${dateRange}
+                        </div>
+                        <div>
+                            ${actionHtml}
+                        </div>
                     </div>
                 </div>
             `;
         }).join('');
 
         container.innerHTML = `
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 2rem;">
                 ${tableRows}
             </div>
         `;
@@ -221,24 +267,36 @@ export default class Bookings {
             const roomCount = building.roomCount || 0;
 
             return `
-                <div class="card premium-card" style="padding: 0; cursor: pointer; display: flex; flex-direction: column; transition: all 0.3s ease; border: 1px solid var(--glass-border); border-radius: 1rem; overflow: hidden; background: var(--bg-secondary); box-shadow: 0 4px 6px var(--shadow-color);" data-id="${building.$id}" onclick="window.history.pushState(null, null, '/building/${building.$id}'); window.dispatchEvent(new Event('popstate'));" onmouseover="this.style.transform='translateY(-5px)'; this.style.boxShadow='0 20px 40px var(--shadow-color)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px var(--shadow-color)';">
+                <div class="card premium-card" style="padding: 0; cursor: pointer; display: flex; flex-direction: column; transition: all 0.3s ease; border: 1px solid var(--glass-border); border-radius: 1.2rem; overflow: hidden; background: var(--bg-secondary); box-shadow: 0 4px 6px var(--shadow-color);" data-id="${building.$id}" onclick="window.history.pushState(null, null, '/building/${building.$id}'); window.dispatchEvent(new Event('popstate'));" onmouseover="this.style.transform='translateY(-5px)'; this.style.boxShadow='0 20px 40px var(--shadow-color)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px var(--shadow-color)';">
                     <div style="position: relative;">
-                        <div class="gallery-trigger" data-pictures="${JSON.stringify(building.Pictures || []).replace(/"/g, '&quot;')}" style="height: 180px; background: url('${imgUrl}') center/cover; position: relative;" title="Click to view all pictures">
-                            <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,0.6) 100%);"></div>
+                        <div class="gallery-trigger" data-pictures="${JSON.stringify(building.Pictures || []).replace(/"/g, '&quot;')}" style="height: 200px; background: url('${imgUrl}') center/cover; position: relative;" title="Click to view all pictures">
+                            <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,0.4) 100%);"></div>
                         </div>
                         <div style="position: absolute; top: 1rem; right: 1rem; background: var(--glass-bg); backdrop-filter: blur(4px); padding: 0.4rem 1rem; border-radius: 2rem; border: 1px solid var(--glass-border); font-size: 0.8rem; font-weight: bold; color: var(--text-primary); letter-spacing: 1px; text-transform: uppercase;">
                             ${building.Type || 'Unknown'}
                         </div>
                     </div>
-                    <div style="padding: 1.25rem; flex: 1; display: flex; flex-direction: column;">
-                        <h3 style="color: var(--text-primary); margin-bottom: 0.5rem; font-size: 1.2rem; font-weight: 700;">${building.Name || 'Unnamed Building'}</h3>
-                        <p style="font-size: 0.9rem; color: var(--text-secondary); flex: 1; display: flex; align-items: flex-start; gap: 0.5rem;">
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="14" height="14" style="margin-top: 2px; flex-shrink: 0;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    <div style="padding: 1.5rem; flex: 1; display: flex; flex-direction: column;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <h3 style="color: var(--text-primary); margin-bottom: 0.2rem; font-size: 1.3rem; font-weight: 800;">${building.Name || 'Unnamed Building'}</h3>
+                            <div style="display: flex; align-items: center; gap: 0.25rem; background: var(--bg-color); padding: 0.2rem 0.6rem; border-radius: 1rem; border: 1px solid var(--glass-border);">
+                                <svg fill="currentColor" viewBox="0 0 24 24" width="14" height="14" style="color: #fbbf24;"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"></path></svg>
+                                <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">${building.averageRating ? building.averageRating.toFixed(1) : 'New'}</span>
+                            </div>
+                        </div>
+                        <p style="font-size: 0.95rem; color: var(--text-secondary); margin-bottom: 1rem; display: flex; align-items: flex-start; gap: 0.5rem;">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16" style="margin-top: 2px; flex-shrink: 0;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                             <span>${building.Address || 'No Address Provided'}</span>
                         </p>
-                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--glass-border); display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-size: 0.85rem; font-weight: bold; color: var(--text-primary);">Rooms: <span style="color: var(--success);">${roomCount}</span></span>
-                            <span style="color: var(--accent); font-weight: 600; font-size: 0.85rem;">View Details &rarr;</span>
+                        <div style="margin-top: auto; border-top: 1px solid var(--glass-border); padding-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; margin-bottom: 0.2rem;">Available</div>
+                                <div style="font-size: 1.1rem; font-weight: 800; color: ${building.availableRoomsCount > 0 ? 'var(--success)' : (building.roomCount > 0 ? 'var(--success)' : 'var(--danger)')};">${building.availableRoomsCount !== undefined ? building.availableRoomsCount : (building.roomCount || 0)} Rooms</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; margin-bottom: 0.2rem;">${building.LeasingPeriod ? building.LeasingPeriod.charAt(0).toUpperCase() + building.LeasingPeriod.slice(1) + ' Price' : 'Price'}</div>
+                                <div style="font-size: 1.1rem; font-weight: 800; color: var(--accent);">${building.averageAvailablePrice ? `₦${Math.round(building.averageAvailablePrice).toLocaleString()}` : (building.Price ? `₦${Math.round(building.Price).toLocaleString()}` : 'View Details')}</div>
+                            </div>
                         </div>
                     </div>
                 </div>
