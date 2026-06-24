@@ -60,6 +60,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Future updates modal
+  const futureUpdatesBtn = document.getElementById('btn-future-updates');
+  if (futureUpdatesBtn) {
+    futureUpdatesBtn.addEventListener('click', () => {
+      const modal = document.getElementById('modal-future-updates');
+      if (modal) {
+        modal.showModal();
+        // also close sidebar if on mobile
+        document.getElementById('sidebar')?.classList.remove('sidebar-open');
+      }
+    });
+  }
+
   // Setup login handler
   document.addEventListener('submit', async (e) => {
     if (e.target && e.target.id === 'login-form') {

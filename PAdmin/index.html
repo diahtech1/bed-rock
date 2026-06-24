@@ -34,6 +34,12 @@
             Visit Buyer Site
           </a>
         </li>
+        <li>
+          <button id="btn-future-updates" class="nav-item" style="color: var(--accent);">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            Future Updates
+          </button>
+        </li>
       </ul>
       
       <div class="sidebar-footer">
@@ -344,6 +350,21 @@
         <button id="lightbox-next" class="btn-icon" style="position: absolute; right: 0; z-index: 10; background: rgba(0,0,0,0.5); color: white; border-radius: 50%; width: 40px; height: 40px;">&rarr;</button>
     </div>
     <div id="lightbox-counter" style="text-align: center; margin-top: 10px; color: var(--text-primary);"></div>
+  </dialog>
+
+  <dialog id="modal-future-updates" class="glass-modal">
+    <div class="modal-header">
+      <h3 style="color: var(--accent);">Future Updates</h3>
+      <button class="btn-icon" onclick="document.getElementById('modal-future-updates').close()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="margin-bottom: 1rem; color: var(--text-secondary);">We are constantly working to improve Bedrock. Here is a taste of what is coming soon to the Manager interface:</p>
+      <ul style="list-style-type: disc; margin-left: 1.5rem; color: var(--text-primary); line-height: 1.8;">
+          <li><strong>Report Parsing:</strong> Automatically extract and analyze data from various property reports.</li>
+          <li><strong>Report Generation:</strong> Generate comprehensive financial and occupancy reports with one click.</li>
+          <li><strong>Booking Confirmation:</strong> Optional manual review step for incoming bookings before they are finalized.</li>
+      </ul>
+    </div>
   </dialog>
 
   <script type="module" src="./src/main.js"></script>

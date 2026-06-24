@@ -544,3 +544,18 @@ export function openLightboxGallery(pictures) {
         }
     });
 }
+
+export function openFutureUpdatesModal() {
+    const html = `
+        <div style="text-align: left;">
+            <p style="margin-bottom: 1rem; color: var(--text-secondary);">We are constantly working to improve Bedrock. Here is a taste of what is coming soon to the Platform:</p>
+            <ul style="list-style-type: disc; margin-left: 1.5rem; color: var(--text-primary); line-height: 1.8;">
+                <li><strong>Proximity Sorting:</strong> Find buildings sorted by their distance to your campus or workplace.</li>
+                <li><strong>AI Chat bot:</strong> A smart assistant to help you navigate, find the perfect room, and answer your questions instantly.</li>
+                <li><strong>Refund Period:</strong> Clear and automated refund processes for eligible bookings.</li>
+            </ul>
+        </div>
+    `;
+    modalContainer.innerHTML = createModalHTML("Future Updates", html);
+    attachCloseEvent();
+}
